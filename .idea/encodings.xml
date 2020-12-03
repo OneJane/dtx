@@ -9,6 +9,12 @@
     <file url="file://$PROJECT_DIR$/dtx-seata/dtx-seata-bank2/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/dtx-seata/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/dtx-seata/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-tcc/dtx-tcc-bank1/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-tcc/dtx-tcc-bank1/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-tcc/dtx-tcc-bank2/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-tcc/dtx-tcc-bank2/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-tcc/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-tcc/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/resources" charset="UTF-8" />
   </component>

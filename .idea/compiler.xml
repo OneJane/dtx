@@ -10,7 +10,13 @@
         <module name="dtx-seata-bank2" />
         <module name="dtx-seata-bank1" />
         <module name="discover-server" />
+        <module name="dtx-tcc-bank2" />
+        <module name="dtx-tcc-bank1" />
+        <module name="untitled" />
       </profile>
     </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="untitled" target="1.8" />
+    </bytecodeTargetLevel>
   </component>
 </project>
