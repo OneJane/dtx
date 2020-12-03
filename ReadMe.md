@@ -582,6 +582,424 @@ public class AccountInfoServiceImpl implements AccountInfoService {
 
 http://127.0.0.1:56081/bank1/transfer?amount=2
 
+# RocketMQ实现可靠消息最终一致性
+
+在bank1、bank2数据库中新增de_duplication，交易记录表(去重表)，用于交易幂等控制。
+
+交互流程如下： 
+
+1、Bank1向MQ Server发送转账消息 
+
+2、Bank1执行本地事务，扣减金额 
+
+3、Bank2接收消息，执行本地事务，添加金额 
+
+[RocketMQ](https://archive.apache.org/dist/rocketmq/4.5.0/rocketmq-all-4.5.0-bin-release.zip)解压并启动nameserver
+
+```
+set ROCKETMQ_HOME=C:\Users\rocketmq-all-4.5.0-bin-release
+bin>mqnamesrv.cmd
+```
+
+启动brocker
+
+```
+set ROCKETMQ_HOME=C:\Users\rocketmq-all-4.5.0-bin-release
+bin>mqbroker.cmd ‐n 127.0.0.1:9876 autoCreateTopicEnable=true
+```
+
+dtx/dtx-txmsg/dtx-txmsg-bank1 ，操作张三账户，连接数据库bank1 
+
+dtx/dtx-txmsg/dtx-txmsg-bank2 ，操作李四账户，连接数据库bank2 
+
+在dtx父工程中指定了SpringBoot和SpringCloud版本 
+
+```
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-dependencies</artifactId>
+    <version>2.1.3.RELEASE</version>
+    <type>pom</type>
+    <scope>import</scope>
+</dependency>
+
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-dependencies</artifactId>
+    <version>Greenwich.RELEASE</version>
+    <type>pom</type>
+    <scope>import</scope>
+</dependency>
+```
+
+在dtx-txmsg父工程中指定了rocketmq-spring-boot-starter的版本
+
+```
+<dependency>
+    <groupId>org.apache.rocketmq</groupId>
+    <artifactId>rocketmq-spring-boot-starter</artifactId>
+    <version>2.0.2</version>
+</dependency>
+```
+
+配置rocketMQ 
+
+```
+rocketmq.producer.group = producer_bank2
+rocketmq.name-server = 127.0.0.1:9876
+```
+
+## dtx-txmsg-bank1
+
+1、张三扣减金额，提交本地事务。 
+
+2、向MQ发送转账消息。 
+
+**Dao**
+
+```
+@Mapper
+@Component
+public interface AccountInfoDao {
+    @Update("update account_info set account_balance=account_balance+#{amount} where account_no=#{accountNo}")
+    int updateAccountBalance(@Param("accountNo") String accountNo, @Param("amount") Double amount);
+
+
+    @Select("select * from account_info where where account_no=#{accountNo}")
+    AccountInfo findByIdAccountNo(@Param("accountNo") String accountNo);
+
+
+
+    @Select("select count(1) from de_duplication where tx_no = #{txNo}")
+    int isExistTx(String txNo);
+
+
+    @Insert("insert into de_duplication values(#{txNo},now());")
+    int addTx(String txNo);
+
+}
+```
+
+**AccountInfoService**
+
+```
+@Service
+@Slf4j
+public class AccountInfoServiceImpl implements AccountInfoService {
+
+    @Autowired
+    AccountInfoDao accountInfoDao;
+
+    @Autowired
+    RocketMQTemplate rocketMQTemplate;
+
+
+    //向mq发送转账消息
+    @Override
+    public void sendUpdateAccountBalance(AccountChangeEvent accountChangeEvent) {
+
+        //将accountChangeEvent转成json
+        JSONObject jsonObject =new JSONObject();
+        jsonObject.put("accountChange",accountChangeEvent);
+        String jsonString = jsonObject.toJSONString();
+        //生成message类型
+        Message<String> message = MessageBuilder.withPayload(jsonString).build();
+        //发送一条事务消息
+        /**
+         * String txProducerGroup 生产组
+         * String destination topic，
+         * Message<?> message, 消息内容
+         * Object arg 参数
+         */
+        rocketMQTemplate.sendMessageInTransaction("producer_group_txmsg_bank1","topic_txmsg",message,null);
+
+    }
+
+    //更新账户，扣减金额
+    @Override
+    @Transactional
+    public void doUpdateAccountBalance(AccountChangeEvent accountChangeEvent) {
+        //幂等判断
+        if(accountInfoDao.isExistTx(accountChangeEvent.getTxNo())>0){
+            return ;
+        }
+        //扣减金额
+        accountInfoDao.updateAccountBalance(accountChangeEvent.getAccountNo(),accountChangeEvent.getAmount() * -1);
+        //添加事务日志
+        accountInfoDao.addTx(accountChangeEvent.getTxNo());
+        if(accountChangeEvent.getAmount() == 3){
+            throw new RuntimeException("人为制造异常");
+        }
+    }
+}
+```
+
+**RocketMQLocalTransactionListener**
+
+编写RocketMQLocalTransactionListener接口实现类，实现执行本地事务和事务回查两个方法。
+
+```
+@Component
+@Slf4j
+@RocketMQTransactionListener(txProducerGroup = "producer_group_txmsg_bank1")
+public class ProducerTxmsgListener implements RocketMQLocalTransactionListener {
+
+    @Autowired
+    AccountInfoService accountInfoService;
+
+    @Autowired
+    AccountInfoDao accountInfoDao;
+
+    //事务消息发送后的回调方法，当消息发送给mq成功，此方法被回调
+    @Override
+    @Transactional
+    public RocketMQLocalTransactionState executeLocalTransaction(Message message, Object o) {
+
+        try {
+            //解析message，转成AccountChangeEvent
+            String messageString = new String((byte[]) message.getPayload());
+            JSONObject jsonObject = JSONObject.parseObject(messageString);
+            String accountChangeString = jsonObject.getString("accountChange");
+            //将accountChange（json）转成AccountChangeEvent
+            AccountChangeEvent accountChangeEvent = JSONObject.parseObject(accountChangeString, AccountChangeEvent.class);
+            //执行本地事务，扣减金额
+            accountInfoService.doUpdateAccountBalance(accountChangeEvent);
+            //当返回RocketMQLocalTransactionState.COMMIT，自动向mq发送commit消息，mq将消息的状态改为可消费
+            return RocketMQLocalTransactionState.COMMIT;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return RocketMQLocalTransactionState.ROLLBACK;
+        }
+
+
+    }
+
+    //事务状态回查，查询是否扣减金额
+    @Override
+    public RocketMQLocalTransactionState checkLocalTransaction(Message message) {
+        //解析message，转成AccountChangeEvent
+        String messageString = new String((byte[]) message.getPayload());
+        JSONObject jsonObject = JSONObject.parseObject(messageString);
+        String accountChangeString = jsonObject.getString("accountChange");
+        //将accountChange（json）转成AccountChangeEvent
+        AccountChangeEvent accountChangeEvent = JSONObject.parseObject(accountChangeString, AccountChangeEvent.class);
+        //事务id
+        String txNo = accountChangeEvent.getTxNo();
+        int existTx = accountInfoDao.isExistTx(txNo);
+        if(existTx>0){
+            return RocketMQLocalTransactionState.COMMIT;
+        }else{
+            return RocketMQLocalTransactionState.UNKNOWN;
+        }
+    }
+}
+```
+
+##  **dtx-txmsg-bank2**
+
+1、监听MQ，接收消息。 
+
+2、接收到消息增加账户金额。
+
+**Service**
+
+注意为避免消息重复发送，这里需要实现幂等。 
+
+```
+@Service
+@Slf4j
+public class AccountInfoServiceImpl implements AccountInfoService {
+
+    @Autowired
+    AccountInfoDao accountInfoDao;
+
+    //更新账户，增加金额
+    @Override
+    @Transactional
+    public void addAccountInfoBalance(AccountChangeEvent accountChangeEvent) {
+        log.info("bank2更新本地账号，账号：{},金额：{}",accountChangeEvent.getAccountNo(),accountChangeEvent.getAmount());
+        if(accountInfoDao.isExistTx(accountChangeEvent.getTxNo())>0){
+
+            return ;
+        }
+        //增加金额
+        accountInfoDao.updateAccountBalance(accountChangeEvent.getAccountNo(),accountChangeEvent.getAmount());
+        //添加事务记录，用于幂等
+        accountInfoDao.addTx(accountChangeEvent.getTxNo());
+        if(accountChangeEvent.getAmount() == 4){
+            throw new RuntimeException("人为制造异常");
+        }
+    }
+}
+```
+
+**MQ监听类** 
+
+```
+@Component
+@Slf4j
+@RocketMQMessageListener(consumerGroup = "consumer_group_txmsg_bank2",topic = "topic_txmsg")
+public class TxmsgConsumer implements RocketMQListener<String> {
+
+    @Autowired
+    AccountInfoService accountInfoService;
+
+    //接收消息
+    @Override
+    public void onMessage(String message) {
+        log.info("开始消费消息:{}",message);
+        //解析消息
+        JSONObject jsonObject = JSONObject.parseObject(message);
+        String accountChangeString = jsonObject.getString("accountChange");
+        //转成AccountChangeEvent
+        AccountChangeEvent accountChangeEvent = JSONObject.parseObject(accountChangeString, AccountChangeEvent.class);
+        //设置账号为李四的
+        accountChangeEvent.setAccountNo("2");
+        //更新本地账户，增加金额
+        accountInfoService.addAccountInfoBalance(accountChangeEvent);
+
+    }
+}
+```
+
+可靠消息最终一致性就是保证消息从生产方经过消息中间件传递到消费方的一致性，本案例使用了RocketMQ作为 
+
+消息中间件，RocketMQ主要解决了两个功能： 
+
+1、本地事务与消息发送的原子性问题。 
+
+2、事务参与方接收消息的可靠性，bank2接收消息失败，一直重试接收消息，幂等性。
+
+可靠消息最终一致性事务适合执行周期长且实时性要求不高的场景。引入消息机制后，同步的事务操作变为基于消 息执行的异步操作, 避免了分布式事务中的同步阻塞操作的影响，并实现了两个服务的解耦。 
+
+# RocketMQ最大努力通知
+
+目标：采用MQ的ack机制就可以实现最大努力通知，发起通知方通过一定的机制最大努力将业务处理结果通知到接收方。 
+
+具体包括： 
+
+1、有一定的消息重复通知机制。 
+
+因为接收通知方可能没有接收到通知，此时要有一定的机制对消息重复通知。 
+
+2、消息校对机制。 
+
+如果尽最大努力也没有通知到接收方，或者接收方消费消息后要再次消费，此时可由接收方主动向通知方查询消息 信息来满足需求。 
+
+**最大努力通知与可靠消息一致性有什么不同？** 
+
+1、解决方案思想不同 
+
+可靠消息一致性，发起通知方需要保证将消息发出去，并且将消息发到接收通知方，消息的可靠性关键由发起通知 方来保证。 
+
+最大努力通知，发起通知方尽最大的努力将业务处理结果通知为接收通知方，但是可能消息接收不到，此时需要接 收通知方主动调用发起通知方的接口查询业务处理结果，通知的可靠性关键在接收通知方。 
+
+2、两者的业务应用场景不同 
+
+可靠消息一致性关注的是交易过程的事务一致，以异步的方式完成交易。 
+
+最大努力通知关注的是交易后的通知事务，即将交易结果可靠的通知出去。 
+
+3、技术解决方向不同 
+
+可靠消息一致性要解决消息从发出到接收的一致性，即消息发出并且被接收到。 
+
+最大努力通知无法保证消息从发出到接收的一致性，只提供消息接收的可靠性机制。可靠机制是，最大努力的将消 息通知给接收方，当消息无法被接收方接收时，由接收方主动查询消息（业务处理结果）。 
+
+**方案1**
+
+![image-20201203211712992](upload\image-20201203211712992.png)
+
+1、发起方将通知发给MQ。 
+
+注意：如果消息没有发出去可由接收通知方主动请求发起通知方查询业务执行结果。
+
+2、接收通知方监听 MQ。 
+
+3、接收方接收消息，业务处理完成回应ack。 
+
+4、接收方若没有回应ack则MQ会重复通知。 
+
+MQ会**按照间隔1min、5min、10min、30min、1h、2h、5h、10h的方式，逐步拉大通知间隔** （如果MQ采用 
+
+rocketMq，在broker中可进行配置），直到达到通知要求的时间窗口上限。 
+
+5、接收方可通过消息校对接口来校对消息的一致性
+
+**方案2**
+
+![image-20201203212054036](upload\image-20201203212054036.png)
+
+1、发起通知方将通知发给MQ。 
+
+使用可靠消息一致方案中的事务消息保证本地事务与消息的原子性，最终将通知先发给MQ。 
+
+2、通知程序监听 MQ，接收MQ的消息。 
+
+方案1中接收方直接监听MQ，方案2中由通知程序监听MQ。通知程序若没有回应ack则MQ会重复通知。 
+
+3、通知程序通过互联网接口协议（如http、webservice）调用接收通知方案接口，完成通知。 
+
+通知程序调用接收通知方案接口成功就表示通知成功，即消费MQ消息成功，MQ将不再向通知程序投递通知消 
+
+息。
+
+4、接收方可通过消息校对接口来校对消息的一致性。 
+
+**方案1和方案2的不同点：** 
+
+1、方案1中接收方与MQ接口，即接收通知方案监听 MQ，此方案主要应用与内部应用之间的通知。 
+
+2、方案2中由通知程序与MQ接口，通知程序监听MQ，收到MQ的消息后由通知程序通过互联网接口协议调用接收方。此方案主要应用于外部应用之间的通知，例如支付宝、微信的支付结果通知。 
+
+![image-20201203212353311](upload\image-20201203212353311.png)
+
+充值交互流程如下：
+
+1、用户请求充值系统进行充值。 
+
+2、充值系统完成充值将充值结果发给MQ。 
+
+3、账户系统监听MQ，接收充值结果通知，如果接收不到消息，MQ会重复发送通知。接收到充值结果通知账户系 
+
+统增加充值金额。 
+
+4、账户系统也可以主动查询充值系统的充值结果查询接口，增加金额
+
+dtx/dtx-notifymsg/dtx-notifymsg-bank1 银行1，操作张三账户， 连接数据库bank1 
+
+dtx/dtx-notifymsg/dtx-notifymsg-pay 银行2，操作充值记录，连接数据库bank1_pay
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

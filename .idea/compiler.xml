@@ -9,10 +9,12 @@
         <outputRelativeToContentRoot value="true" />
         <module name="dtx-seata-bank2" />
         <module name="dtx-seata-bank1" />
+        <module name="dtx-txmsg-bank1" />
         <module name="discover-server" />
         <module name="dtx-tcc-bank2" />
         <module name="dtx-tcc-bank1" />
         <module name="untitled" />
+        <module name="dtx-txmsg-bank2" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel>

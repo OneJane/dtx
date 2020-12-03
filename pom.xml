@@ -12,6 +12,7 @@
         <module>dtx-seata</module>
         <module>discover-server</module>
         <module>dtx-tcc</module>
+        <module>dtx-txmsg</module>
     </modules>
 
     <properties>
