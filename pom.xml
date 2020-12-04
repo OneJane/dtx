@@ -13,6 +13,7 @@
         <module>discover-server</module>
         <module>dtx-tcc</module>
         <module>dtx-txmsg</module>
+        <module>dtx-notifymsg</module>
     </modules>
 
     <properties>

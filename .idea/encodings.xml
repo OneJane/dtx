@@ -3,6 +3,12 @@
   <component name="Encoding">
     <file url="file://$PROJECT_DIR$/discover-server/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/discover-server/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-notifymsg/dtx-notifymsg-bank1/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-notifymsg/dtx-notifymsg-bank1/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-notifymsg/dtx-notifymsg-pay/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-notifymsg/dtx-notifymsg-pay/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-notifymsg/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dtx-notifymsg/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/dtx-seata/dtx-seata-bank1/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/dtx-seata/dtx-seata-bank1/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/dtx-seata/dtx-seata-bank2/src/main/java" charset="UTF-8" />

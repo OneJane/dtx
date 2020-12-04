@@ -11,13 +11,18 @@
         <module name="dtx-seata-bank1" />
         <module name="dtx-txmsg-bank1" />
         <module name="discover-server" />
+        <module name="dtx-notifymsg-bank1" />
         <module name="dtx-tcc-bank2" />
         <module name="dtx-tcc-bank1" />
+        <module name="dtx-notifymsg-demo-pay" />
+        <module name="dtx-notifymsg-pay" />
         <module name="untitled" />
+        <module name="dtx-notifymsg" />
         <module name="dtx-txmsg-bank2" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel>
+      <module name="dtx-notifymsg-demo-pay" target="1.8" />
       <module name="untitled" target="1.8" />
     </bytecodeTargetLevel>
   </component>
